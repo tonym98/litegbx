@@ -123,7 +123,7 @@ public:
 };
 
 /**
- * Vivo RPC command dispatcher.
+ * GoByte RPC command dispatcher.
  */
 class CRPCTable
 {
