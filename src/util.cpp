@@ -1,11 +1,12 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2017 The Vivo Core developers
+// Copyright (c) 2014-2017 The Dash Core developers
+// Copyright (c) 2017-2018 The GoByte Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include "config/vivo-config.h"
+#include "config/gobyte-config.h"
 #endif
 
 #include "util.h"
@@ -102,7 +103,7 @@ namespace boost {
 
 using namespace std;
 
-//Vivo only features
+//GoByte only features
 bool fMasterNode = false;
 bool fLiteMode = false;
 /**
@@ -114,8 +115,8 @@ bool fLiteMode = false;
 */
 int nWalletBackups = 10;
 
-const char * const BITCOIN_CONF_FILENAME = "vivo.conf";
-const char * const BITCOIN_PID_FILENAME = "vivod.pid";
+const char * const BITCOIN_CONF_FILENAME = "gobyte.conf";
+const char * const BITCOIN_PID_FILENAME = "gobyted.pid";
 
 map<string, string> mapArgs;
 map<string, vector<string> > mapMultiArgs;
@@ -269,8 +270,8 @@ bool LogAcceptCategory(const char* category)
             const vector<string>& categories = mapMultiArgs["-debug"];
             ptrCategory.reset(new set<string>(categories.begin(), categories.end()));
             // thread_specific_ptr automatically deletes the set when the thread ends.
-            // "vivo" is a composite category enabling all Vivo-related debug output
-            if(ptrCategory->count(string("vivo"))) {
+            // "gobyte" is a composite category enabling all GoByte-related debug output
+            if(ptrCategory->count(string("gobyte"))) {
                 ptrCategory->insert(string("privatesend"));
                 ptrCategory->insert(string("instantsend"));
                 ptrCategory->insert(string("masternode"));
@@ -494,7 +495,7 @@ static std::string FormatException(const std::exception* pex, const char* pszThr
     char pszModule[MAX_PATH] = "";
     GetModuleFileNameA(NULL, pszModule, sizeof(pszModule));
 #else
-    const char* pszModule = "vivo";
+    const char* pszModule = "gobyte";
 #endif
     if (pex)
         return strprintf(
@@ -514,13 +515,13 @@ void PrintExceptionContinue(const std::exception* pex, const char* pszThread)
 boost::filesystem::path GetDefaultDataDir()
 {
     namespace fs = boost::filesystem;
-    // Windows < Vista: C:\Documents and Settings\Username\Application Data\VivoCore
-    // Windows >= Vista: C:\Users\Username\AppData\Roaming\VivoCore
-    // Mac: ~/Library/Application Support/VivoCore
-    // Unix: ~/.vivocore
+    // Windows < Vista: C:\Documents and Settings\Username\Application Data\GoByteCore
+    // Windows >= Vista: C:\Users\Username\AppData\Roaming\GoByteCore
+    // Mac: ~/Library/Application Support/GoByteCore
+    // Unix: ~/.gobytecore
 #ifdef WIN32
     // Windows
-    return GetSpecialFolderPath(CSIDL_APPDATA) / "VivoCore";
+    return GetSpecialFolderPath(CSIDL_APPDATA) / "GoByteCore";
 #else
     fs::path pathRet;
     char* pszHome = getenv("HOME");
@@ -530,10 +531,10 @@ boost::filesystem::path GetDefaultDataDir()
         pathRet = fs::path(pszHome);
 #ifdef MAC_OSX
     // Mac
-    return pathRet / "Library/Application Support/VivoCore";
+    return pathRet / "Library/Application Support/GoByteCore";
 #else
     // Unix
-    return pathRet / ".vivocore";
+    return pathRet / ".gobytecore";
 #endif
 #endif
 }
@@ -627,7 +628,7 @@ void ReadConfigFile(map<string, string>& mapSettingsRet,
 {
     boost::filesystem::ifstream streamConfig(GetConfigFile());
     if (!streamConfig.good()){
-        // Create empty vivo.conf if it does not excist
+        // Create empty gobyte.conf if it does not excist
         FILE* configFile = fopen(GetConfigFile().string().c_str(), "a");
         if (configFile != NULL)
             fclose(configFile);
@@ -639,7 +640,7 @@ void ReadConfigFile(map<string, string>& mapSettingsRet,
 
     for (boost::program_options::detail::config_file_iterator it(streamConfig, setOptions), end; it != end; ++it)
     {
-        // Don't overwrite existing settings so command line settings override vivo.conf
+        // Don't overwrite existing settings so command line settings override gobyte.conf
         string strKey = string("-") + it->string_key;
         string strValue = it->value[0];
         InterpretNegativeSetting(strKey, strValue);
