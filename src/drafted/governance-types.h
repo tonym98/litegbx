@@ -16,9 +16,9 @@ enum GovernanceObjectType {
     ValueOverride = 1, 
 
     // -------------------------------
-    // VivoNetwork - is the root node
-    VivoNetwork = 1000,
-    VivoNetworkVariable = 1001,
+    // GoByteNetwork - is the root node
+    GoByteNetwork = 1000,
+    GoByteNetworkVariable = 1001,
     Category = 1002,
 
     // Actors
