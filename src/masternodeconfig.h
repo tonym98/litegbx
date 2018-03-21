@@ -1,99 +1,91 @@
-// Copyright (c) 2014-2017 The Dash Core developers
-// Copyright (c) 2017-2018 The GoByte Core developers
-// Distributed under the MIT/X11 software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef SRC_MASTERNODECONFIG_H_
-#define SRC_MASTERNODECONFIG_H_
+#include "netbase.h"
+#include "masternodeconfig.h"
+#include "util.h"
+#include "chainparams.h"
 
-class CMasternodeConfig;
-extern CMasternodeConfig masternodeConfig;
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
 
-class CMasternodeConfig
-{
+CMasternodeConfig masternodeConfig;
 
-public:
+void CMasternodeConfig::add(std::string alias, std::string ip, std::string privKey, std::string txHash, std::string outputIndex) {
+    CMasternodeEntry cme(alias, ip, privKey, txHash, outputIndex);
+    entries.push_back(cme);
+}
 
-    class CMasternodeEntry {
+bool CMasternodeConfig::read(std::string& strErr) {
+    int linenumber = 1;
+    boost::filesystem::path pathMasternodeConfigFile = GetMasternodeConfigFile();
+    boost::filesystem::ifstream streamConfig(pathMasternodeConfigFile);
 
-    private:
-        std::string alias;
-        std::string ip;
-        std::string privKey;
-        std::string txHash;
-        std::string outputIndex;
-    public:
-
-        CMasternodeEntry(std::string alias, std::string ip, std::string privKey, std::string txHash, std::string outputIndex) {
-            this->alias = alias;
-            this->ip = ip;
-            this->privKey = privKey;
-            this->txHash = txHash;
-            this->outputIndex = outputIndex;
+    if (!streamConfig.good()) {
+        FILE* configFile = fopen(pathMasternodeConfigFile.string().c_str(), "a");
+        if (configFile != NULL) {
+            std::string strHeader = "# Masternode config file\n"
+                          "# Format: alias IP:port masternodeprivkey collateral_output_txid collateral_output_index\n"
+                          "# Example: mn1 127.0.0.2:12455 93HaYBVUCYjEMeeH1Y4sBGLALQZE1Yc1K64xiqgX37tGBDQL8Xg 2bcd3c84c84f87eaa86e4e56834c92927a07f9e18718810b92e0d0324456a67c 0\n";
+            fwrite(strHeader.c_str(), std::strlen(strHeader.c_str()), 1, configFile);
+            fclose(configFile);
         }
-
-        const std::string& getAlias() const {
-            return alias;
-        }
-
-        void setAlias(const std::string& alias) {
-            this->alias = alias;
-        }
-
-        const std::string& getOutputIndex() const {
-            return outputIndex;
-        }
-
-        void setOutputIndex(const std::string& outputIndex) {
-            this->outputIndex = outputIndex;
-        }
-
-        const std::string& getPrivKey() const {
-            return privKey;
-        }
-
-        void setPrivKey(const std::string& privKey) {
-            this->privKey = privKey;
-        }
-
-        const std::string& getTxHash() const {
-            return txHash;
-        }
-
-        void setTxHash(const std::string& txHash) {
-            this->txHash = txHash;
-        }
-
-        const std::string& getIp() const {
-            return ip;
-        }
-
-        void setIp(const std::string& ip) {
-            this->ip = ip;
-        }
-    };
-
-    CMasternodeConfig() {
-        entries = std::vector<CMasternodeEntry>();
+        return true; // Nothing to read, so just return
     }
 
-    void clear();
-    bool read(std::string& strErr);
-    void add(std::string alias, std::string ip, std::string privKey, std::string txHash, std::string outputIndex);
+    for(std::string line; std::getline(streamConfig, line); linenumber++)
+    {
+        if(line.empty()) continue;
 
-    std::vector<CMasternodeEntry>& getEntries() {
-        return entries;
+        std::istringstream iss(line);
+        std::string comment, alias, ip, privKey, txHash, outputIndex;
+
+        if (iss >> comment) {
+            if(comment.at(0) == '#') continue;
+            iss.str(line);
+            iss.clear();
+        }
+
+        if (!(iss >> alias >> ip >> privKey >> txHash >> outputIndex)) {
+            iss.str(line);
+            iss.clear();
+            if (!(iss >> alias >> ip >> privKey >> txHash >> outputIndex)) {
+                strErr = _("Could not parse masternode.conf") + "\n" +
+                        strprintf(_("Line: %d"), linenumber) + "\n\"" + line + "\"";
+                streamConfig.close();
+                return false;
+            }
+        }
+
+        int port = 0;
+        std::string hostname = "";
+        SplitHostPort(ip, port, hostname);
+        if(port == 0 || hostname == "") {
+            strErr = _("Failed to parse host:port string") + "\n"+
+                    strprintf(_("Line: %d"), linenumber) + "\n\"" + line + "\"";
+            streamConfig.close();
+            return false;
+        }
+        int mainnetDefaultPort = Params(CBaseChainParams::MAIN).GetDefaultPort();
+        if(Params().NetworkIDString() == CBaseChainParams::MAIN) {
+            if(port != mainnetDefaultPort) {
+                strErr = _("Invalid port detected in masternode.conf") + "\n" +
+                        strprintf(_("Port: %d"), port) + "\n" +
+                        strprintf(_("Line: %d"), linenumber) + "\n\"" + line + "\"" + "\n" +
+                        strprintf(_("(must be %d for mainnet)"), mainnetDefaultPort);
+                streamConfig.close();
+                return false;
+            }
+        } else if(port == mainnetDefaultPort) {
+            strErr = _("Invalid port detected in masternode.conf") + "\n" +
+                    strprintf(_("Line: %d"), linenumber) + "\n\"" + line + "\"" + "\n" +
+                    strprintf(_("(%d could be used only on mainnet)"), mainnetDefaultPort);
+            streamConfig.close();
+            return false;
+        }
+
+
+        add(alias, ip, privKey, txHash, outputIndex);
     }
 
-    int getCount() {
-        return (int)entries.size();
-    }
-
-private:
-    std::vector<CMasternodeEntry> entries;
-
-
-};
-
-
-#endif /* SRC_MASTERNODECONFIG_H_ */
+    streamConfig.close();
+    return true;
+}
