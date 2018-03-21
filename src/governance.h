@@ -1,11 +1,11 @@
-// Copyright (c) 2014-2017 The Vivo Core developers
+// Copyright (c) 2014-2017 The GoByte Core developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef GOVERNANCE_H
 #define GOVERNANCE_H
 
-//#define ENABLE_VIVO_DEBUG
+//#define ENABLE_GBX_DEBUG
 
 #include "bloom.h"
 #include "cachemap.h"
