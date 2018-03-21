@@ -7,7 +7,7 @@
 #define BITCOIN_COMPAT_H
 
 #if defined(HAVE_CONFIG_H)
-#include "config/vivo-config.h"
+#include "config/gobyte-config.h"
 #endif
 
 #ifdef WIN32
