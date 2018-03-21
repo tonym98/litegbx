@@ -1,6 +1,7 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2015 The Bitcoin Core developers
-// Copyright (c) 2014-2017 The Vivo Core developers
+// Copyright (c) 2014-2017 The Dash Core developers
+// Copyright (c) 2017-2018 The GoByte Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -75,12 +76,12 @@ static int AppInitRPC(int argc, char* argv[])
     //
     ParseParameters(argc, argv);
     if (argc<2 || mapArgs.count("-?") || mapArgs.count("-h") || mapArgs.count("-help") || mapArgs.count("-version")) {
-        std::string strUsage = _("Vivo Core RPC client version") + " " + FormatFullVersion() + "\n";
+        std::string strUsage = _("GoByte Core RPC client version") + " " + FormatFullVersion() + "\n";
         if (!mapArgs.count("-version")) {
             strUsage += "\n" + _("Usage:") + "\n" +
-                  "  vivo-cli [options] <command> [params]  " + _("Send command to Vivo Core") + "\n" +
-                  "  vivo-cli [options] help                " + _("List commands") + "\n" +
-                  "  vivo-cli [options] help <command>      " + _("Get help for a command") + "\n";
+                  "  gobyte-cli [options] <command> [params]  " + _("Send command to GoByte Core") + "\n" +
+                  "  gobyte-cli [options] help                " + _("List commands") + "\n" +
+                  "  gobyte-cli [options] help <command>      " + _("Get help for a command") + "\n";
 
             strUsage += "\n" + HelpMessageCli();
         }
