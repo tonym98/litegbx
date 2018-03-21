@@ -55,15 +55,15 @@ TESTS =
 BENCHMARKS =
 
 if BUILD_BITCOIND
-  bin_PROGRAMS += vivod
+  bin_PROGRAMS += gobyted
 endif
 
 if BUILD_BITCOIN_UTILS
-  bin_PROGRAMS += vivo-cli vivo-tx
+  bin_PROGRAMS += gobyte-cli gobyte-tx
 endif
 
 .PHONY: FORCE check-symbols check-security
-# vivo core #
+# gobyte core #
 BITCOIN_CORE_H = \
   activemasternode.h \
   addressindex.h \
@@ -191,7 +191,7 @@ obj/build.h: FORCE
 	  $(abs_top_srcdir)
 libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
-# server: shared between vivod and vivo-qt
+# server: shared between gobyted and gobyte-qt
 libbitcoin_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
 libbitcoin_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_server_a_SOURCES = \
@@ -249,7 +249,7 @@ libbitcoin_zmq_a_SOURCES = \
 endif
 
 
-# wallet: shared between vivod and vivo-qt, but only linked
+# wallet: shared between gobyted and gobyte-qt, but only linked
 # when wallet enabled
 libbitcoin_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 libbitcoin_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
@@ -320,7 +320,7 @@ crypto_libbitcoin_crypto_a_SOURCES = \
   crypto/sha512.cpp \
   crypto/sha512.h
 
-# common: shared between vivod, and vivo-qt and non-server tools
+# common: shared between gobyted, and gobyte-qt and non-server tools
 libbitcoin_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 libbitcoin_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_common_a_SOURCES = \
@@ -377,7 +377,7 @@ if GLIBC_BACK_COMPAT
 libbitcoin_util_a_SOURCES += compat/glibc_compat.cpp
 endif
 
-# cli: shared between vivo-cli and vivo-qt
+# cli: shared between gobyte-cli and gobyte-qt
 libbitcoin_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 libbitcoin_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_cli_a_SOURCES = \
@@ -388,16 +388,16 @@ nodist_libbitcoin_util_a_SOURCES = $(srcdir)/obj/build.h
 #
 
 # bitcoind binary #
-vivod_SOURCES = vivod.cpp
-vivod_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
-vivod_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-vivod_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+gobyted_SOURCES = gobyted.cpp
+gobyted_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
+gobyted_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+gobyted_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-vivod_SOURCES += vivod-res.rc
+gobyted_SOURCES += gobyted-res.rc
 endif
 
-vivod_LDADD = \
+gobyted_LDADD = \
   $(LIBBITCOIN_SERVER) \
   $(LIBBITCOIN_COMMON) \
   $(LIBUNIVALUE) \
@@ -408,50 +408,50 @@ vivod_LDADD = \
   $(LIBSECP256K1)
 
 if ENABLE_ZMQ
-vivod_LDADD += $(LIBBITCOIN_ZMQ) $(ZMQ_LIBS)
+gobyted_LDADD += $(LIBBITCOIN_ZMQ) $(ZMQ_LIBS)
 endif
 
 if ENABLE_WALLET
-vivod_LDADD += libbitcoin_wallet.a
+gobyted_LDADD += libbitcoin_wallet.a
 endif
 
-vivod_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS)
+gobyted_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS)
 
-# vivo-cli binary #
-vivo_cli_SOURCES = vivo-cli.cpp
-vivo_cli_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(EVENT_CFLAGS)
-vivo_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-vivo_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# gobyte-cli binary #
+gobyte_cli_SOURCES = gobyte-cli.cpp
+gobyte_cli_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(EVENT_CFLAGS)
+gobyte_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+gobyte_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-vivo_cli_SOURCES += vivo-cli-res.rc
+gobyte_cli_SOURCES += gobyte-cli-res.rc
 endif
 
-vivo_cli_LDADD = \
+gobyte_cli_LDADD = \
   $(LIBBITCOIN_CLI) \
   $(LIBUNIVALUE) \
   $(LIBBITCOIN_UTIL)
-vivo_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
+gobyte_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
 #
 
-# vivo-tx binary #
-vivo_tx_SOURCES = vivo-tx.cpp
-vivo_tx_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
-vivo_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-vivo_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# gobyte-tx binary #
+gobyte_tx_SOURCES = gobyte-tx.cpp
+gobyte_tx_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
+gobyte_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+gobyte_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-vivo_tx_SOURCES += vivo-tx-res.rc
+gobyte_tx_SOURCES += gobyte-tx-res.rc
 endif
 
-vivo_tx_LDADD = \
+gobyte_tx_LDADD = \
   $(LIBUNIVALUE) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
   $(LIBBITCOIN_CRYPTO) \
   $(LIBSECP256K1)
 
-vivo_tx_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
+gobyte_tx_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 #
 
 # bitcoinconsensus library #
