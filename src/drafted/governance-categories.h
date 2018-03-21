@@ -4,22 +4,22 @@
 
 	* means the category has an associated class
 	
-	CVivoNetwork: VIVO NETWORK (ROOT)
+	CGoByteNetwork: GOBYTE NETWORK (ROOT)
 	has:
 		vector<CNetworkVariable> vecNetworkVariables;
-		vector<CVivoProject> vecProjects;
+		vector<CGoByteProject> vecProjects;
 		vector<CGovernanceObject> vecProposals;
 		vector<CBudgetContract> vecContracts;
 		vector<CBudgetUsers> vecUsers;
 
-	CVivoProject:
+	CGoByteProject:
 	has:
 		name
 		employees
 
 */
 
-	// VIVO NETWORK (ROOT)
+	// GOBYTE NETWORK (ROOT)
 	// 	-> NETWORK VARIABLE
 	// 		-> switch, setting
 	// 	-> CATEGORIES
@@ -49,7 +49,7 @@
 	// 			-> USER1 (only users are allowed here in this scope)
 	// 			-> USER2
 	// 		-> GROUP2 (EVO)
-	// 			-> VALUEOVERRIDE (STORE=VIVODRIVE)
+	// 			-> VALUEOVERRIDE (STORE=GBXDRIVE)
 	// 			-> USER1
 
 	// 	-> COMPANIES
