@@ -1,983 +1,608 @@
-// Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2015 The Bitcoin Core developers
 // Copyright (c) 2014-2017 The Dash Core developers
 // Copyright (c) 2017-2018 The GoByte Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "base58.h"
+#include "rpcserver.h"
+
+#include "chainparams.h"
 #include "clientversion.h"
-#include "init.h"
 #include "main.h"
 #include "net.h"
 #include "netbase.h"
-#include "rpcserver.h"
+#include "protocol.h"
+#include "sync.h"
 #include "timedata.h"
-#include "txmempool.h"
+#include "ui_interface.h"
 #include "util.h"
-#include "spork.h"
 #include "utilstrencodings.h"
-#ifdef ENABLE_WALLET
-#include "masternode-sync.h"
-#include "wallet/wallet.h"
-#include "wallet/walletdb.h"
-#endif
+#include "version.h"
 
-#include <stdint.h>
-
-#include <boost/assign/list_of.hpp>
-#include <boost/algorithm/string.hpp>
+#include <boost/foreach.hpp>
 
 #include <univalue.h>
 
 using namespace std;
 
-/**
- * @note Do not add or change anything in the information returned by this
- * method. `getinfo` exists for backwards-compatibility only. It combines
- * information from wildly different sources in the program, which is a mess,
- * and is thus planned to be deprecated eventually.
- *
- * Based on the source of the information, new information should be added to:
- * - `getblockchaininfo`,
- * - `getnetworkinfo` or
- * - `getwalletinfo`
- *
- * Or alternatively, create a specific query method for the information.
- **/
-UniValue getinfo(const UniValue& params, bool fHelp)
+UniValue getconnectioncount(const UniValue& params, bool fHelp)
 {
     if (fHelp || params.size() != 0)
         throw runtime_error(
-            "getinfo\n"
-            "Returns an object containing various state info.\n"
+            "getconnectioncount\n"
+            "\nReturns the number of connections to other nodes.\n"
             "\nResult:\n"
-            "{\n"
-            "  \"version\": xxxxx,           (numeric) the server version\n"
-            "  \"protocolversion\": xxxxx,   (numeric) the protocol version\n"
-            "  \"walletversion\": xxxxx,     (numeric) the wallet version\n"
-            "  \"balance\": xxxxxxx,         (numeric) the total gobyte balance of the wallet\n"
-            "  \"privatesend_balance\": xxxxxx, (numeric) the anonymized gobyte balance of the wallet\n"
-            "  \"blocks\": xxxxxx,           (numeric) the current number of blocks processed in the server\n"
-            "  \"timeoffset\": xxxxx,        (numeric) the time offset\n"
-            "  \"connections\": xxxxx,       (numeric) the number of connections\n"
-            "  \"proxy\": \"host:port\",     (string, optional) the proxy used by the server\n"
-            "  \"difficulty\": xxxxxx,       (numeric) the current difficulty\n"
-            "  \"testnet\": true|false,      (boolean) if the server is using testnet or not\n"
-            "  \"keypoololdest\": xxxxxx,    (numeric) the timestamp (seconds since GMT epoch) of the oldest pre-generated key in the key pool\n"
-            "  \"keypoolsize\": xxxx,        (numeric) how many new keys are pre-generated\n"
-            "  \"unlocked_until\": ttt,      (numeric) the timestamp in seconds since epoch (midnight Jan 1 1970 GMT) that the wallet is unlocked for transfers, or 0 if the wallet is locked\n"
-            "  \"paytxfee\": x.xxxx,         (numeric) the transaction fee set in " + CURRENCY_UNIT + "/kB\n"
-            "  \"relayfee\": x.xxxx,         (numeric) minimum relay fee for non-free transactions in " + CURRENCY_UNIT + "/kB\n"
-            "  \"errors\": \"...\"           (string) any error messages\n"
-            "}\n"
+            "n          (numeric) The connection count\n"
             "\nExamples:\n"
-            + HelpExampleCli("getinfo", "")
-            + HelpExampleRpc("getinfo", "")
+            + HelpExampleCli("getconnectioncount", "")
+            + HelpExampleRpc("getconnectioncount", "")
         );
 
-#ifdef ENABLE_WALLET
-    LOCK2(cs_main, pwalletMain ? &pwalletMain->cs_wallet : NULL);
-#else
-    LOCK(cs_main);
-#endif
-
-    proxyType proxy;
-    GetProxy(NET_IPV4, proxy);
-
-    UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("version", CLIENT_VERSION));
-    obj.push_back(Pair("protocolversion", PROTOCOL_VERSION));
-#ifdef ENABLE_WALLET
-    if (pwalletMain) {
-        obj.push_back(Pair("walletversion", pwalletMain->GetVersion()));
-        obj.push_back(Pair("balance",       ValueFromAmount(pwalletMain->GetBalance())));
-        if(!fLiteMode)
-            obj.push_back(Pair("privatesend_balance",       ValueFromAmount(pwalletMain->GetAnonymizedBalance())));
-    }
-#endif
-    obj.push_back(Pair("blocks",        (int)chainActive.Height()));
-    obj.push_back(Pair("timeoffset",    GetTimeOffset()));
-    obj.push_back(Pair("connections",   (int)vNodes.size()));
-    obj.push_back(Pair("proxy",         (proxy.IsValid() ? proxy.proxy.ToStringIPPort() : string())));
-    obj.push_back(Pair("difficulty",    (double)GetDifficulty()));
-    obj.push_back(Pair("testnet",       Params().TestnetToBeDeprecatedFieldRPC()));
-#ifdef ENABLE_WALLET
-    if (pwalletMain) {
-        obj.push_back(Pair("keypoololdest", pwalletMain->GetOldestKeyPoolTime()));
-        obj.push_back(Pair("keypoolsize",   (int)pwalletMain->GetKeyPoolSize()));
-    }
-    if (pwalletMain && pwalletMain->IsCrypted())
-        obj.push_back(Pair("unlocked_until", nWalletUnlockTime));
-    obj.push_back(Pair("paytxfee",      ValueFromAmount(payTxFee.GetFeePerK())));
-#endif
-    obj.push_back(Pair("relayfee",      ValueFromAmount(::minRelayTxFee.GetFeePerK())));
-    obj.push_back(Pair("errors",        GetWarnings("statusbar")));
-    return obj;
-}
-
-UniValue debug(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "debug ( 0|1|addrman|alert|bench|coindb|db|lock|rand|rpc|selectcoins|mempool"
-            "|mempoolrej|net|proxy|prune|http|libevent|tor|zmq|"
-            "gobyte|privatesend|instantsend|masternode|spork|keepass|mnpayments|gobject )\n"
-            "Change debug category on the fly. Specify single category or use comma to specify many.\n"
-            "\nExamples:\n"
-            + HelpExampleCli("debug", "gobyte")
-            + HelpExampleRpc("debug", "gobyte,net")
-        );
-
-    std::string strMode = params[0].get_str();
-
-    mapMultiArgs["-debug"].clear();
-    boost::split(mapMultiArgs["-debug"], strMode, boost::is_any_of(","));
-    mapArgs["-debug"] = mapMultiArgs["-debug"][mapMultiArgs["-debug"].size() - 1];
-
-    fDebug = mapArgs["-debug"] != "0";
-
-    return "Debug mode: " + (fDebug ? strMode : "off");
-}
-
-UniValue mnsync(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "mnsync [status|next|reset]\n"
-            "Returns the sync status, updates to the next step or resets it entirely.\n"
-        );
-
-    std::string strMode = params[0].get_str();
-
-    if(strMode == "status") {
-        UniValue objStatus(UniValue::VOBJ);
-        objStatus.push_back(Pair("AssetID", masternodeSync.GetAssetID()));
-        objStatus.push_back(Pair("AssetName", masternodeSync.GetAssetName()));
-        objStatus.push_back(Pair("Attempt", masternodeSync.GetAttempt()));
-        objStatus.push_back(Pair("IsBlockchainSynced", masternodeSync.IsBlockchainSynced()));
-        objStatus.push_back(Pair("IsMasternodeListSynced", masternodeSync.IsMasternodeListSynced()));
-        objStatus.push_back(Pair("IsWinnersListSynced", masternodeSync.IsWinnersListSynced()));
-        objStatus.push_back(Pair("IsSynced", masternodeSync.IsSynced()));
-        objStatus.push_back(Pair("IsFailed", masternodeSync.IsFailed()));
-        return objStatus;
-    }
-
-    if(strMode == "next")
-    {
-        masternodeSync.SwitchToNextAsset();
-        return "sync updated to " + masternodeSync.GetAssetName();
-    }
-
-    if(strMode == "reset")
-    {
-        masternodeSync.Reset();
-        return "success";
-    }
-    return "failure";
-}
-
-#ifdef ENABLE_WALLET
-class DescribeAddressVisitor : public boost::static_visitor<UniValue>
-{
-public:
-    UniValue operator()(const CNoDestination &dest) const { return UniValue(UniValue::VOBJ); }
-
-    UniValue operator()(const CKeyID &keyID) const {
-        UniValue obj(UniValue::VOBJ);
-        CPubKey vchPubKey;
-        obj.push_back(Pair("isscript", false));
-        if (pwalletMain && pwalletMain->GetPubKey(keyID, vchPubKey)) {
-            obj.push_back(Pair("pubkey", HexStr(vchPubKey)));
-            obj.push_back(Pair("iscompressed", vchPubKey.IsCompressed()));
-        }
-        return obj;
-    }
-
-    UniValue operator()(const CScriptID &scriptID) const {
-        UniValue obj(UniValue::VOBJ);
-        CScript subscript;
-        obj.push_back(Pair("isscript", true));
-        if (pwalletMain && pwalletMain->GetCScript(scriptID, subscript)) {
-            std::vector<CTxDestination> addresses;
-            txnouttype whichType;
-            int nRequired;
-            ExtractDestinations(subscript, whichType, addresses, nRequired);
-            obj.push_back(Pair("script", GetTxnOutputType(whichType)));
-            obj.push_back(Pair("hex", HexStr(subscript.begin(), subscript.end())));
-            UniValue a(UniValue::VARR);
-            BOOST_FOREACH(const CTxDestination& addr, addresses)
-                a.push_back(CBitcoinAddress(addr).ToString());
-            obj.push_back(Pair("addresses", a));
-            if (whichType == TX_MULTISIG)
-                obj.push_back(Pair("sigsrequired", nRequired));
-        }
-        return obj;
-    }
-};
-#endif
-
-/*
-    Used for updating/reading spork settings on the network
-*/
-UniValue spork(const UniValue& params, bool fHelp)
-{
-    if(params.size() == 1 && params[0].get_str() == "show"){
-        UniValue ret(UniValue::VOBJ);
-        for(int nSporkID = SPORK_START; nSporkID <= SPORK_END; nSporkID++){
-            if(sporkManager.GetSporkNameByID(nSporkID) != "Unknown")
-                ret.push_back(Pair(sporkManager.GetSporkNameByID(nSporkID), sporkManager.GetSporkValue(nSporkID)));
-        }
-        return ret;
-    } else if(params.size() == 1 && params[0].get_str() == "active"){
-        UniValue ret(UniValue::VOBJ);
-        for(int nSporkID = SPORK_START; nSporkID <= SPORK_END; nSporkID++){
-            if(sporkManager.GetSporkNameByID(nSporkID) != "Unknown")
-                ret.push_back(Pair(sporkManager.GetSporkNameByID(nSporkID), sporkManager.IsSporkActive(nSporkID)));
-        }
-        return ret;
-    } else if (params.size() == 2){
-        int nSporkID = sporkManager.GetSporkIDByName(params[0].get_str());
-        if(nSporkID == -1){
-            return "Invalid spork name";
-        }
-
-        // SPORK VALUE
-        int64_t nValue = params[1].get_int64();
-
-        //broadcast new spork
-        if(sporkManager.UpdateSpork(nSporkID, nValue)){
-            sporkManager.ExecuteSpork(nSporkID, nValue);
-            return "success";
-        } else {
-            return "failure";
-        }
-
-    }
-
-    throw runtime_error(
-        "spork <name> [<value>]\n"
-        "<name> is the corresponding spork name, or 'show' to show all current spork settings, active to show which sporks are active"
-        "<value> is a epoch datetime to enable or disable spork"
-        + HelpRequiringPassphrase());
-}
-
-UniValue validateaddress(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "validateaddress \"gobyteaddress\"\n"
-            "\nReturn information about the given gobyte address.\n"
-            "\nArguments:\n"
-            "1. \"gobyteaddress\"     (string, required) The gobyte address to validate\n"
-            "\nResult:\n"
-            "{\n"
-            "  \"isvalid\" : true|false,       (boolean) If the address is valid or not. If not, this is the only property returned.\n"
-            "  \"address\" : \"gobyteaddress\", (string) The gobyte address validated\n"
-            "  \"scriptPubKey\" : \"hex\",       (string) The hex encoded scriptPubKey generated by the address\n"
-            "  \"ismine\" : true|false,        (boolean) If the address is yours or not\n"
-            "  \"iswatchonly\" : true|false,   (boolean) If the address is watchonly\n"
-            "  \"isscript\" : true|false,      (boolean) If the key is a script\n"
-            "  \"pubkey\" : \"publickeyhex\",    (string) The hex value of the raw public key\n"
-            "  \"iscompressed\" : true|false,  (boolean) If the address is compressed\n"
-            "  \"account\" : \"account\"         (string) DEPRECATED. The account associated with the address, \"\" is the default account\n"
-            "}\n"
-            "\nExamples:\n"
-            + HelpExampleCli("validateaddress", "\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"")
-            + HelpExampleRpc("validateaddress", "\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"")
-        );
-
-#ifdef ENABLE_WALLET
-    LOCK2(cs_main, pwalletMain ? &pwalletMain->cs_wallet : NULL);
-#else
-    LOCK(cs_main);
-#endif
-
-    CBitcoinAddress address(params[0].get_str());
-    bool isValid = address.IsValid();
-
-    UniValue ret(UniValue::VOBJ);
-    ret.push_back(Pair("isvalid", isValid));
-    if (isValid)
-    {
-        CTxDestination dest = address.Get();
-        string currentAddress = address.ToString();
-        ret.push_back(Pair("address", currentAddress));
-
-        CScript scriptPubKey = GetScriptForDestination(dest);
-        ret.push_back(Pair("scriptPubKey", HexStr(scriptPubKey.begin(), scriptPubKey.end())));
-
-#ifdef ENABLE_WALLET
-        isminetype mine = pwalletMain ? IsMine(*pwalletMain, dest) : ISMINE_NO;
-        ret.push_back(Pair("ismine", (mine & ISMINE_SPENDABLE) ? true : false));
-        ret.push_back(Pair("iswatchonly", (mine & ISMINE_WATCH_ONLY) ? true: false));
-        UniValue detail = boost::apply_visitor(DescribeAddressVisitor(), dest);
-        ret.pushKVs(detail);
-        if (pwalletMain && pwalletMain->mapAddressBook.count(dest))
-            ret.push_back(Pair("account", pwalletMain->mapAddressBook[dest].name));
-#endif
-    }
-    return ret;
-}
-
-/**
- * Used by addmultisigaddress / createmultisig:
- */
-CScript _createmultisig_redeemScript(const UniValue& params)
-{
-    int nRequired = params[0].get_int();
-    const UniValue& keys = params[1].get_array();
-
-    // Gather public keys
-    if (nRequired < 1)
-        throw runtime_error("a multisignature address must require at least one key to redeem");
-    if ((int)keys.size() < nRequired)
-        throw runtime_error(
-            strprintf("not enough keys supplied "
-                      "(got %u keys, but need at least %d to redeem)", keys.size(), nRequired));
-    if (keys.size() > 16)
-        throw runtime_error("Number of addresses involved in the multisignature address creation > 16\nReduce the number");
-    std::vector<CPubKey> pubkeys;
-    pubkeys.resize(keys.size());
-    for (unsigned int i = 0; i < keys.size(); i++)
-    {
-        const std::string& ks = keys[i].get_str();
-#ifdef ENABLE_WALLET
-        // Case 1: GoByte address and we have full public key:
-        CBitcoinAddress address(ks);
-        if (pwalletMain && address.IsValid())
-        {
-            CKeyID keyID;
-            if (!address.GetKeyID(keyID))
-                throw runtime_error(
-                    strprintf("%s does not refer to a key",ks));
-            CPubKey vchPubKey;
-            if (!pwalletMain->GetPubKey(keyID, vchPubKey))
-                throw runtime_error(
-                    strprintf("no full public key for address %s",ks));
-            if (!vchPubKey.IsFullyValid())
-                throw runtime_error(" Invalid public key: "+ks);
-            pubkeys[i] = vchPubKey;
-        }
-
-        // Case 2: hex public key
-        else
-#endif
-        if (IsHex(ks))
-        {
-            CPubKey vchPubKey(ParseHex(ks));
-            if (!vchPubKey.IsFullyValid())
-                throw runtime_error(" Invalid public key: "+ks);
-            pubkeys[i] = vchPubKey;
-        }
-        else
-        {
-            throw runtime_error(" Invalid public key: "+ks);
-        }
-    }
-    CScript result = GetScriptForMultisig(nRequired, pubkeys);
-
-    if (result.size() > MAX_SCRIPT_ELEMENT_SIZE)
-        throw runtime_error(
-                strprintf("redeemScript exceeds size limit: %d > %d", result.size(), MAX_SCRIPT_ELEMENT_SIZE));
-
-    return result;
-}
-
-UniValue createmultisig(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() < 2 || params.size() > 2)
-    {
-        string msg = "createmultisig nrequired [\"key\",...]\n"
-            "\nCreates a multi-signature address with n signature of m keys required.\n"
-            "It returns a json object with the address and redeemScript.\n"
-
-            "\nArguments:\n"
-            "1. nrequired      (numeric, required) The number of required signatures out of the n keys or addresses.\n"
-            "2. \"keys\"       (string, required) A json array of keys which are gobyte addresses or hex-encoded public keys\n"
-            "     [\n"
-            "       \"key\"    (string) gobyte address or hex-encoded public key\n"
-            "       ,...\n"
-            "     ]\n"
-
-            "\nResult:\n"
-            "{\n"
-            "  \"address\":\"multisigaddress\",  (string) The value of the new multisig address.\n"
-            "  \"redeemScript\":\"script\"       (string) The string value of the hex-encoded redemption script.\n"
-            "}\n"
-
-            "\nExamples:\n"
-            "\nCreate a multisig address from 2 addresses\n"
-            + HelpExampleCli("createmultisig", "2 \"[\\\"Xt4qk9uKvQYAonVGSZNXqxeDmtjaEWgfrs\\\",\\\"XoSoWQkpgLpppPoyyzbUFh1fq2RBvW6UK1\\\"]\"") +
-            "\nAs a json rpc call\n"
-            + HelpExampleRpc("createmultisig", "2, \"[\\\"Xt4qk9uKvQYAonVGSZNXqxeDmtjaEWgfrs\\\",\\\"XoSoWQkpgLpppPoyyzbUFh1fq2RBvW6UK1\\\"]\"")
-        ;
-        throw runtime_error(msg);
-    }
-
-    // Construct using pay-to-script-hash:
-    CScript inner = _createmultisig_redeemScript(params);
-    CScriptID innerID(inner);
-    CBitcoinAddress address(innerID);
-
-    UniValue result(UniValue::VOBJ);
-    result.push_back(Pair("address", address.ToString()));
-    result.push_back(Pair("redeemScript", HexStr(inner.begin(), inner.end())));
-
-    return result;
-}
-
-UniValue verifymessage(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 3)
-        throw runtime_error(
-            "verifymessage \"gobyteaddress\" \"signature\" \"message\"\n"
-            "\nVerify a signed message\n"
-            "\nArguments:\n"
-            "1. \"gobyteaddress\"  (string, required) The gobyte address to use for the signature.\n"
-            "2. \"signature\"       (string, required) The signature provided by the signer in base 64 encoding (see signmessage).\n"
-            "3. \"message\"         (string, required) The message that was signed.\n"
-            "\nResult:\n"
-            "true|false   (boolean) If the signature is verified or not.\n"
-            "\nExamples:\n"
-            "\nUnlock the wallet for 30 seconds\n"
-            + HelpExampleCli("walletpassphrase", "\"mypassphrase\" 30") +
-            "\nCreate the signature\n"
-            + HelpExampleCli("signmessage", "\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\" \"my message\"") +
-            "\nVerify the signature\n"
-            + HelpExampleCli("verifymessage", "\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\" \"signature\" \"my message\"") +
-            "\nAs json rpc\n"
-            + HelpExampleRpc("verifymessage", "\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\", \"signature\", \"my message\"")
-        );
-
-    LOCK(cs_main);
-
-    string strAddress  = params[0].get_str();
-    string strSign     = params[1].get_str();
-    string strMessage  = params[2].get_str();
-
-    CBitcoinAddress addr(strAddress);
-    if (!addr.IsValid())
-        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid address");
-
-    CKeyID keyID;
-    if (!addr.GetKeyID(keyID))
-        throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to key");
-
-    bool fInvalid = false;
-    vector<unsigned char> vchSig = DecodeBase64(strSign.c_str(), &fInvalid);
-
-    if (fInvalid)
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Malformed base64 encoding");
-
-    CHashWriter ss(SER_GETHASH, 0);
-    ss << strMessageMagic;
-    ss << strMessage;
-
-    CPubKey pubkey;
-    if (!pubkey.RecoverCompact(ss.GetHash(), vchSig))
-        return false;
-
-    return (pubkey.GetID() == keyID);
-}
-
-UniValue setmocktime(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "setmocktime timestamp\n"
-            "\nSet the local time to given timestamp (-regtest only)\n"
-            "\nArguments:\n"
-            "1. timestamp  (integer, required) Unix seconds-since-epoch timestamp\n"
-            "   Pass 0 to go back to using the system time."
-        );
-
-    if (!Params().MineBlocksOnDemand())
-        throw runtime_error("setmocktime for regression testing (-regtest mode) only");
-
-    // cs_vNodes is locked and node send/receive times are updated
-    // atomically with the time change to prevent peers from being
-    // disconnected because we think we haven't communicated with them
-    // in a long time.
     LOCK2(cs_main, cs_vNodes);
 
-    RPCTypeCheck(params, boost::assign::list_of(UniValue::VNUM));
-    SetMockTime(params[0].get_int64());
+    return (int)vNodes.size();
+}
 
-    uint64_t t = GetTime();
-    BOOST_FOREACH(CNode* pnode, vNodes) {
-        pnode->nLastSend = pnode->nLastRecv = t;
+UniValue ping(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "ping\n"
+            "\nRequests that a ping be sent to all other nodes, to measure ping time.\n"
+            "Results provided in getpeerinfo, pingtime and pingwait fields are decimal seconds.\n"
+            "Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.\n"
+            "\nExamples:\n"
+            + HelpExampleCli("ping", "")
+            + HelpExampleRpc("ping", "")
+        );
+
+    // Request that each node send a ping during next message processing pass
+    LOCK2(cs_main, cs_vNodes);
+
+    BOOST_FOREACH(CNode* pNode, vNodes) {
+        pNode->fPingQueued = true;
     }
 
     return NullUniValue;
 }
 
-bool getAddressFromIndex(const int &type, const uint160 &hash, std::string &address)
+static void CopyNodeStats(std::vector<CNodeStats>& vstats)
 {
-    if (type == 2) {
-        address = CBitcoinAddress(CScriptID(hash)).ToString();
-    } else if (type == 1) {
-        address = CBitcoinAddress(CKeyID(hash)).ToString();
-    } else {
-        return false;
+    vstats.clear();
+
+    LOCK(cs_vNodes);
+    vstats.reserve(vNodes.size());
+    BOOST_FOREACH(CNode* pnode, vNodes) {
+        CNodeStats stats;
+        pnode->copyStats(stats);
+        vstats.push_back(stats);
     }
-    return true;
 }
 
-bool getAddressesFromParams(const UniValue& params, std::vector<std::pair<uint160, int> > &addresses)
+UniValue getpeerinfo(const UniValue& params, bool fHelp)
 {
-    if (params[0].isStr()) {
-        CBitcoinAddress address(params[0].get_str());
-        uint160 hashBytes;
-        int type = 0;
-        if (!address.GetIndexKey(hashBytes, type)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-        }
-        addresses.push_back(std::make_pair(hashBytes, type));
-    } else if (params[0].isObject()) {
-
-        UniValue addressValues = find_value(params[0].get_obj(), "addresses");
-        if (!addressValues.isArray()) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Addresses is expected to be an array");
-        }
-
-        std::vector<UniValue> values = addressValues.getValues();
-
-        for (std::vector<UniValue>::iterator it = values.begin(); it != values.end(); ++it) {
-
-            CBitcoinAddress address(it->get_str());
-            uint160 hashBytes;
-            int type = 0;
-            if (!address.GetIndexKey(hashBytes, type)) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-            }
-            addresses.push_back(std::make_pair(hashBytes, type));
-        }
-    } else {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
-
-    return true;
-}
-
-bool heightSort(std::pair<CAddressUnspentKey, CAddressUnspentValue> a,
-                std::pair<CAddressUnspentKey, CAddressUnspentValue> b) {
-    return a.second.blockHeight < b.second.blockHeight;
-}
-
-bool timestampSort(std::pair<CMempoolAddressDeltaKey, CMempoolAddressDelta> a,
-                   std::pair<CMempoolAddressDeltaKey, CMempoolAddressDelta> b) {
-    return a.second.time < b.second.time;
-}
-
-UniValue getaddressmempool(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
+    if (fHelp || params.size() != 0)
         throw runtime_error(
-            "getaddressmempool\n"
-            "\nReturns all mempool deltas for an address (requires addressindex to be enabled).\n"
-            "\nArguments:\n"
-            "{\n"
-            "  \"addresses\"\n"
-            "    [\n"
-            "      \"address\"  (string) The base58check encoded address\n"
-            "      ,...\n"
-            "    ]\n"
-            "}\n"
+            "getpeerinfo\n"
+            "\nReturns data about each connected network node as a json array of objects.\n"
             "\nResult:\n"
             "[\n"
             "  {\n"
-            "    \"address\"  (string) The base58check encoded address\n"
-            "    \"txid\"  (string) The related txid\n"
-            "    \"index\"  (number) The related input or output index\n"
-            "    \"satoshis\"  (number) The difference of satoshis\n"
-            "    \"timestamp\"  (number) The time the transaction entered the mempool (seconds)\n"
-            "    \"prevtxid\"  (string) The previous txid (if spending)\n"
-            "    \"prevout\"  (string) The previous transaction output index (if spending)\n"
+            "    \"id\": n,                   (numeric) Peer index\n"
+            "    \"addr\":\"host:port\",      (string) The ip address and port of the peer\n"
+            "    \"addrlocal\":\"ip:port\",   (string) local address\n"
+            "    \"services\":\"xxxxxxxxxxxxxxxx\",   (string) The services offered\n"
+            "    \"relaytxes\":true|false,    (boolean) Whether peer has asked us to relay transactions to it\n"
+            "    \"lastsend\": ttt,           (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last send\n"
+            "    \"lastrecv\": ttt,           (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last receive\n"
+            "    \"bytessent\": n,            (numeric) The total bytes sent\n"
+            "    \"bytesrecv\": n,            (numeric) The total bytes received\n"
+            "    \"conntime\": ttt,           (numeric) The connection time in seconds since epoch (Jan 1 1970 GMT)\n"
+            "    \"timeoffset\": ttt,         (numeric) The time offset in seconds\n"
+            "    \"pingtime\": n,             (numeric) ping time\n"
+            "    \"minping\": n,              (numeric) minimum observed ping time\n"
+            "    \"pingwait\": n,             (numeric) ping wait\n"
+            "    \"version\": v,              (numeric) The peer version, such as 7001\n"
+            "    \"subver\": \"/GoByte Core:x.x.x/\",  (string) The string version\n"
+            "    \"inbound\": true|false,     (boolean) Inbound (true) or Outbound (false)\n"
+            "    \"startingheight\": n,       (numeric) The starting height (block) of the peer\n"
+            "    \"banscore\": n,             (numeric) The ban score\n"
+            "    \"synced_headers\": n,       (numeric) The last header we have in common with this peer\n"
+            "    \"synced_blocks\": n,        (numeric) The last block we have in common with this peer\n"
+            "    \"inflight\": [\n"
+            "       n,                        (numeric) The heights of blocks we're currently asking from this peer\n"
+            "       ...\n"
+            "    ]\n"
             "  }\n"
-            "]\n"
-            "\nExamples:\n"
-            + HelpExampleCli("getaddressmempool", "'{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}'")
-            + HelpExampleRpc("getaddressmempool", "{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}")
-        );
-
-    std::vector<std::pair<uint160, int> > addresses;
-
-    if (!getAddressesFromParams(params, addresses)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
-
-    std::vector<std::pair<CMempoolAddressDeltaKey, CMempoolAddressDelta> > indexes;
-
-    if (!mempool.getAddressIndex(addresses, indexes)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
-    }
-
-    std::sort(indexes.begin(), indexes.end(), timestampSort);
-
-    UniValue result(UniValue::VARR);
-
-    for (std::vector<std::pair<CMempoolAddressDeltaKey, CMempoolAddressDelta> >::iterator it = indexes.begin();
-         it != indexes.end(); it++) {
-
-        std::string address;
-        if (!getAddressFromIndex(it->first.type, it->first.addressBytes, address)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Unknown address type");
-        }
-
-        UniValue delta(UniValue::VOBJ);
-        delta.push_back(Pair("address", address));
-        delta.push_back(Pair("txid", it->first.txhash.GetHex()));
-        delta.push_back(Pair("index", (int)it->first.index));
-        delta.push_back(Pair("satoshis", it->second.amount));
-        delta.push_back(Pair("timestamp", it->second.time));
-        if (it->second.amount < 0) {
-            delta.push_back(Pair("prevtxid", it->second.prevhash.GetHex()));
-            delta.push_back(Pair("prevout", (int)it->second.prevout));
-        }
-        result.push_back(delta);
-    }
-
-    return result;
-}
-
-UniValue getaddressutxos(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getaddressutxos\n"
-            "\nReturns all unspent outputs for an address (requires addressindex to be enabled).\n"
-            "\nArguments:\n"
-            "{\n"
-            "  \"addresses\"\n"
-            "    [\n"
-            "      \"address\"  (string) The base58check encoded address\n"
-            "      ,...\n"
-            "    ]\n"
-            "}\n"
-            "\nResult\n"
-            "[\n"
-            "  {\n"
-            "    \"address\"  (string) The address base58check encoded\n"
-            "    \"txid\"  (string) The output txid\n"
-            "    \"height\"  (number) The block height\n"
-            "    \"outputIndex\"  (number) The output index\n"
-            "    \"script\"  (strin) The script hex encoded\n"
-            "    \"satoshis\"  (number) The number of satoshis of the output\n"
-            "  }\n"
-            "]\n"
-            "\nExamples:\n"
-            + HelpExampleCli("getaddressutxos", "'{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}'")
-            + HelpExampleRpc("getaddressutxos", "{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}")
-        );
-
-    std::vector<std::pair<uint160, int> > addresses;
-
-    if (!getAddressesFromParams(params, addresses)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
-
-    std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > unspentOutputs;
-
-    for (std::vector<std::pair<uint160, int> >::iterator it = addresses.begin(); it != addresses.end(); it++) {
-        if (!GetAddressUnspent((*it).first, (*it).second, unspentOutputs)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
-        }
-    }
-
-    std::sort(unspentOutputs.begin(), unspentOutputs.end(), heightSort);
-
-    UniValue result(UniValue::VARR);
-
-    for (std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> >::const_iterator it=unspentOutputs.begin(); it!=unspentOutputs.end(); it++) {
-        UniValue output(UniValue::VOBJ);
-        std::string address;
-        if (!getAddressFromIndex(it->first.type, it->first.hashBytes, address)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Unknown address type");
-        }
-
-        output.push_back(Pair("address", address));
-        output.push_back(Pair("txid", it->first.txhash.GetHex()));
-        output.push_back(Pair("outputIndex", (int)it->first.index));
-        output.push_back(Pair("script", HexStr(it->second.script.begin(), it->second.script.end())));
-        output.push_back(Pair("satoshis", it->second.satoshis));
-        output.push_back(Pair("height", it->second.blockHeight));
-        result.push_back(output);
-    }
-
-    return result;
-}
-
-UniValue getaddressdeltas(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1 || !params[0].isObject())
-        throw runtime_error(
-            "getaddressdeltas\n"
-            "\nReturns all changes for an address (requires addressindex to be enabled).\n"
-            "\nArguments:\n"
-            "{\n"
-            "  \"addresses\"\n"
-            "    [\n"
-            "      \"address\"  (string) The base58check encoded address\n"
-            "      ,...\n"
-            "    ]\n"
-            "  \"start\" (number) The start block height\n"
-            "  \"end\" (number) The end block height\n"
-            "}\n"
-            "\nResult:\n"
-            "[\n"
-            "  {\n"
-            "    \"satoshis\"  (number) The difference of satoshis\n"
-            "    \"txid\"  (string) The related txid\n"
-            "    \"index\"  (number) The related input or output index\n"
-            "    \"height\"  (number) The block height\n"
-            "    \"address\"  (string) The base58check encoded address\n"
-            "  }\n"
-            "]\n"
-            "\nExamples:\n"
-            + HelpExampleCli("getaddressdeltas", "'{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}'")
-            + HelpExampleRpc("getaddressdeltas", "{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}")
-        );
-
-
-    UniValue startValue = find_value(params[0].get_obj(), "start");
-    UniValue endValue = find_value(params[0].get_obj(), "end");
-
-    int start = 0;
-    int end = 0;
-
-    if (startValue.isNum() && endValue.isNum()) {
-        start = startValue.get_int();
-        end = endValue.get_int();
-        if (end < start) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "End value is expected to be greater than start");
-        }
-    }
-
-    std::vector<std::pair<uint160, int> > addresses;
-
-    if (!getAddressesFromParams(params, addresses)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
-
-    std::vector<std::pair<CAddressIndexKey, CAmount> > addressIndex;
-
-    for (std::vector<std::pair<uint160, int> >::iterator it = addresses.begin(); it != addresses.end(); it++) {
-        if (start > 0 && end > 0) {
-            if (!GetAddressIndex((*it).first, (*it).second, addressIndex, start, end)) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
-            }
-        } else {
-            if (!GetAddressIndex((*it).first, (*it).second, addressIndex)) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
-            }
-        }
-    }
-
-    UniValue result(UniValue::VARR);
-
-    for (std::vector<std::pair<CAddressIndexKey, CAmount> >::const_iterator it=addressIndex.begin(); it!=addressIndex.end(); it++) {
-        std::string address;
-        if (!getAddressFromIndex(it->first.type, it->first.hashBytes, address)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Unknown address type");
-        }
-
-        UniValue delta(UniValue::VOBJ);
-        delta.push_back(Pair("satoshis", it->second));
-        delta.push_back(Pair("txid", it->first.txhash.GetHex()));
-        delta.push_back(Pair("index", (int)it->first.index));
-        delta.push_back(Pair("blockindex", (int)it->first.txindex));
-        delta.push_back(Pair("height", it->first.blockHeight));
-        delta.push_back(Pair("address", address));
-        result.push_back(delta);
-    }
-
-    return result;
-}
-
-UniValue getaddressbalance(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getaddressbalance\n"
-            "\nReturns the balance for an address(es) (requires addressindex to be enabled).\n"
-            "\nArguments:\n"
-            "{\n"
-            "  \"addresses\"\n"
-            "    [\n"
-            "      \"address\"  (string) The base58check encoded address\n"
-            "      ,...\n"
-            "    ]\n"
-            "}\n"
-            "\nResult:\n"
-            "{\n"
-            "  \"balance\"  (string) The current balance in satoshis\n"
-            "  \"received\"  (string) The total number of satoshis received (including change)\n"
-            "}\n"
-            "\nExamples:\n"
-            + HelpExampleCli("getaddressbalance", "'{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}'")
-            + HelpExampleRpc("getaddressbalance", "{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}")
-        );
-
-    std::vector<std::pair<uint160, int> > addresses;
-
-    if (!getAddressesFromParams(params, addresses)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
-
-    std::vector<std::pair<CAddressIndexKey, CAmount> > addressIndex;
-
-    for (std::vector<std::pair<uint160, int> >::iterator it = addresses.begin(); it != addresses.end(); it++) {
-        if (!GetAddressIndex((*it).first, (*it).second, addressIndex)) {
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
-        }
-    }
-
-    CAmount balance = 0;
-    CAmount received = 0;
-
-    for (std::vector<std::pair<CAddressIndexKey, CAmount> >::const_iterator it=addressIndex.begin(); it!=addressIndex.end(); it++) {
-        if (it->second > 0) {
-            received += it->second;
-        }
-        balance += it->second;
-    }
-
-    UniValue result(UniValue::VOBJ);
-    result.push_back(Pair("balance", balance));
-    result.push_back(Pair("received", received));
-
-    return result;
-
-}
-
-UniValue getaddresstxids(const UniValue& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getaddresstxids\n"
-            "\nReturns the txids for an address(es) (requires addressindex to be enabled).\n"
-            "\nArguments:\n"
-            "{\n"
-            "  \"addresses\"\n"
-            "    [\n"
-            "      \"address\"  (string) The base58check encoded address\n"
-            "      ,...\n"
-            "    ]\n"
-            "  \"start\" (number) The start block height\n"
-            "  \"end\" (number) The end block height\n"
-            "}\n"
-            "\nResult:\n"
-            "[\n"
-            "  \"transactionid\"  (string) The transaction id\n"
             "  ,...\n"
             "]\n"
             "\nExamples:\n"
-            + HelpExampleCli("getaddresstxids", "'{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}'")
-            + HelpExampleRpc("getaddresstxids", "{\"addresses\": [\"XwnLY9Tf7Zsef8gMGL2fhWA9ZmMjt4KPwg\"]}")
+            + HelpExampleCli("getpeerinfo", "")
+            + HelpExampleRpc("getpeerinfo", "")
         );
 
-    std::vector<std::pair<uint160, int> > addresses;
+    LOCK(cs_main);
 
-    if (!getAddressesFromParams(params, addresses)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
-    }
+    vector<CNodeStats> vstats;
+    CopyNodeStats(vstats);
 
-    int start = 0;
-    int end = 0;
-    if (params[0].isObject()) {
-        UniValue startValue = find_value(params[0].get_obj(), "start");
-        UniValue endValue = find_value(params[0].get_obj(), "end");
-        if (startValue.isNum() && endValue.isNum()) {
-            start = startValue.get_int();
-            end = endValue.get_int();
-        }
-    }
+    UniValue ret(UniValue::VARR);
 
-    std::vector<std::pair<CAddressIndexKey, CAmount> > addressIndex;
-
-    for (std::vector<std::pair<uint160, int> >::iterator it = addresses.begin(); it != addresses.end(); it++) {
-        if (start > 0 && end > 0) {
-            if (!GetAddressIndex((*it).first, (*it).second, addressIndex, start, end)) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
+    BOOST_FOREACH(const CNodeStats& stats, vstats) {
+        UniValue obj(UniValue::VOBJ);
+        CNodeStateStats statestats;
+        bool fStateStats = GetNodeStateStats(stats.nodeid, statestats);
+        obj.push_back(Pair("id", stats.nodeid));
+        obj.push_back(Pair("addr", stats.addrName));
+        if (!(stats.addrLocal.empty()))
+            obj.push_back(Pair("addrlocal", stats.addrLocal));
+        obj.push_back(Pair("services", strprintf("%016x", stats.nServices)));
+        obj.push_back(Pair("relaytxes", stats.fRelayTxes));
+        obj.push_back(Pair("lastsend", stats.nLastSend));
+        obj.push_back(Pair("lastrecv", stats.nLastRecv));
+        obj.push_back(Pair("bytessent", stats.nSendBytes));
+        obj.push_back(Pair("bytesrecv", stats.nRecvBytes));
+        obj.push_back(Pair("conntime", stats.nTimeConnected));
+        obj.push_back(Pair("timeoffset", stats.nTimeOffset));
+        obj.push_back(Pair("pingtime", stats.dPingTime));
+        obj.push_back(Pair("minping", stats.dPingMin));
+        if (stats.dPingWait > 0.0)
+            obj.push_back(Pair("pingwait", stats.dPingWait));
+        obj.push_back(Pair("version", stats.nVersion));
+        // Use the sanitized form of subver here, to avoid tricksy remote peers from
+        // corrupting or modifiying the JSON output by putting special characters in
+        // their ver message.
+        obj.push_back(Pair("subver", stats.cleanSubVer));
+        obj.push_back(Pair("inbound", stats.fInbound));
+        obj.push_back(Pair("startingheight", stats.nStartingHeight));
+        if (fStateStats) {
+            obj.push_back(Pair("banscore", statestats.nMisbehavior));
+            obj.push_back(Pair("synced_headers", statestats.nSyncHeight));
+            obj.push_back(Pair("synced_blocks", statestats.nCommonHeight));
+            UniValue heights(UniValue::VARR);
+            BOOST_FOREACH(int height, statestats.vHeightInFlight) {
+                heights.push_back(height);
             }
-        } else {
-            if (!GetAddressIndex((*it).first, (*it).second, addressIndex)) {
-                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available for address");
-            }
+            obj.push_back(Pair("inflight", heights));
         }
+        obj.push_back(Pair("whitelisted", stats.fWhitelisted));
+
+        ret.push_back(obj);
     }
 
-    std::set<std::pair<int, std::string> > txids;
-    UniValue result(UniValue::VARR);
-
-    for (std::vector<std::pair<CAddressIndexKey, CAmount> >::const_iterator it=addressIndex.begin(); it!=addressIndex.end(); it++) {
-        int height = it->first.blockHeight;
-        std::string txid = it->first.txhash.GetHex();
-
-        if (addresses.size() > 1) {
-            txids.insert(std::make_pair(height, txid));
-        } else {
-            if (txids.insert(std::make_pair(height, txid)).second) {
-                result.push_back(txid);
-            }
-        }
-    }
-
-    if (addresses.size() > 1) {
-        for (std::set<std::pair<int, std::string> >::const_iterator it=txids.begin(); it!=txids.end(); it++) {
-            result.push_back(it->second);
-        }
-    }
-
-    return result;
-
+    return ret;
 }
 
-UniValue getspentinfo(const UniValue& params, bool fHelp)
+UniValue addnode(const UniValue& params, bool fHelp)
 {
-
-    if (fHelp || params.size() != 1 || !params[0].isObject())
+    string strCommand;
+    if (params.size() == 2)
+        strCommand = params[1].get_str();
+    if (fHelp || params.size() != 2 ||
+        (strCommand != "onetry" && strCommand != "add" && strCommand != "remove"))
         throw runtime_error(
-            "getspentinfo\n"
-            "\nReturns the txid and index where an output is spent.\n"
+            "addnode \"node\" \"add|remove|onetry\"\n"
+            "\nAttempts add or remove a node from the addnode list.\n"
+            "Or try a connection to a node once.\n"
             "\nArguments:\n"
-            "{\n"
-            "  \"txid\" (string) The hex string of the txid\n"
-            "  \"index\" (number) The start block height\n"
-            "}\n"
-            "\nResult:\n"
-            "{\n"
-            "  \"txid\"  (string) The transaction id\n"
-            "  \"index\"  (number) The spending input index\n"
-            "  ,...\n"
-            "}\n"
+            "1. \"node\"     (string, required) The node (see getpeerinfo for nodes)\n"
+            "2. \"command\"  (string, required) 'add' to add a node to the list, 'remove' to remove a node from the list, 'onetry' to try a connection to the node once\n"
             "\nExamples:\n"
-            + HelpExampleCli("getspentinfo", "'{\"txid\": \"0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9\", \"index\": 0}'")
-            + HelpExampleRpc("getspentinfo", "{\"txid\": \"0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9\", \"index\": 0}")
+            + HelpExampleCli("addnode", "\"192.168.0.6:9999\" \"onetry\"")
+            + HelpExampleRpc("addnode", "\"192.168.0.6:9999\", \"onetry\"")
         );
 
-    UniValue txidValue = find_value(params[0].get_obj(), "txid");
-    UniValue indexValue = find_value(params[0].get_obj(), "index");
+    string strNode = params[0].get_str();
 
-    if (!txidValue.isStr() || !indexValue.isNum()) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid txid or index");
+    if (strCommand == "onetry")
+    {
+        CAddress addr;
+        OpenNetworkConnection(addr, NULL, strNode.c_str());
+        return NullUniValue;
     }
 
-    uint256 txid = ParseHashV(txidValue, "txid");
-    int outputIndex = indexValue.get_int();
+    LOCK(cs_vAddedNodes);
+    vector<string>::iterator it = vAddedNodes.begin();
+    for(; it != vAddedNodes.end(); it++)
+        if (strNode == *it)
+            break;
 
-    CSpentIndexKey key(txid, outputIndex);
-    CSpentIndexValue value;
-
-    if (!GetSpentIndex(key, value)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Unable to get spent info");
+    if (strCommand == "add")
+    {
+        if (it != vAddedNodes.end())
+            throw JSONRPCError(RPC_CLIENT_NODE_ALREADY_ADDED, "Error: Node already added");
+        vAddedNodes.push_back(strNode);
     }
+    else if(strCommand == "remove")
+    {
+        if (it == vAddedNodes.end())
+            throw JSONRPCError(RPC_CLIENT_NODE_NOT_ADDED, "Error: Node has not been added.");
+        vAddedNodes.erase(it);
+    }
+
+    return NullUniValue;
+}
+
+UniValue disconnectnode(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 1)
+        throw runtime_error(
+            "disconnectnode \"node\" \n"
+            "\nImmediately disconnects from the specified node.\n"
+            "\nArguments:\n"
+            "1. \"node\"     (string, required) The node (see getpeerinfo for nodes)\n"
+            "\nExamples:\n"
+            + HelpExampleCli("disconnectnode", "\"192.168.0.6:8333\"")
+            + HelpExampleRpc("disconnectnode", "\"192.168.0.6:8333\"")
+        );
+
+    CNode* pNode = FindNode(params[0].get_str());
+    if (pNode == NULL)
+        throw JSONRPCError(RPC_CLIENT_NODE_NOT_CONNECTED, "Node not found in connected nodes");
+
+    pNode->fDisconnect = true;
+
+    return NullUniValue;
+}
+
+UniValue getaddednodeinfo(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() < 1 || params.size() > 2)
+        throw runtime_error(
+            "getaddednodeinfo dns ( \"node\" )\n"
+            "\nReturns information about the given added node, or all added nodes\n"
+            "(note that onetry addnodes are not listed here)\n"
+            "If dns is false, only a list of added nodes will be provided,\n"
+            "otherwise connected information will also be available.\n"
+            "\nArguments:\n"
+            "1. dns        (boolean, required) If false, only a list of added nodes will be provided, otherwise connected information will also be available.\n"
+            "2. \"node\"   (string, optional) If provided, return information about this specific node, otherwise all nodes are returned.\n"
+            "\nResult:\n"
+            "[\n"
+            "  {\n"
+            "    \"addednode\" : \"192.168.0.201\",   (string) The node ip address\n"
+            "    \"connected\" : true|false,          (boolean) If connected\n"
+            "    \"addresses\" : [\n"
+            "       {\n"
+            "         \"address\" : \"192.168.0.201:9999\",  (string) The gobyte server host and port\n"
+            "         \"connected\" : \"outbound\"           (string) connection, inbound or outbound\n"
+            "       }\n"
+            "       ,...\n"
+            "     ]\n"
+            "  }\n"
+            "  ,...\n"
+            "]\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getaddednodeinfo", "true")
+            + HelpExampleCli("getaddednodeinfo", "true \"192.168.0.201\"")
+            + HelpExampleRpc("getaddednodeinfo", "true, \"192.168.0.201\"")
+        );
+
+    bool fDns = params[0].get_bool();
+
+    list<string> laddedNodes(0);
+    if (params.size() == 1)
+    {
+        LOCK(cs_vAddedNodes);
+        BOOST_FOREACH(const std::string& strAddNode, vAddedNodes)
+            laddedNodes.push_back(strAddNode);
+    }
+    else
+    {
+        string strNode = params[1].get_str();
+        LOCK(cs_vAddedNodes);
+        BOOST_FOREACH(const std::string& strAddNode, vAddedNodes) {
+            if (strAddNode == strNode)
+            {
+                laddedNodes.push_back(strAddNode);
+                break;
+            }
+        }
+        if (laddedNodes.size() == 0)
+            throw JSONRPCError(RPC_CLIENT_NODE_NOT_ADDED, "Error: Node has not been added.");
+    }
+
+    UniValue ret(UniValue::VARR);
+    if (!fDns)
+    {
+        BOOST_FOREACH (const std::string& strAddNode, laddedNodes) {
+            UniValue obj(UniValue::VOBJ);
+            obj.push_back(Pair("addednode", strAddNode));
+            ret.push_back(obj);
+        }
+        return ret;
+    }
+
+    list<pair<string, vector<CService> > > laddedAddreses(0);
+    BOOST_FOREACH(const std::string& strAddNode, laddedNodes) {
+        vector<CService> vservNode(0);
+        if(Lookup(strAddNode.c_str(), vservNode, Params().GetDefaultPort(), fNameLookup, 0))
+            laddedAddreses.push_back(make_pair(strAddNode, vservNode));
+        else
+        {
+            UniValue obj(UniValue::VOBJ);
+            obj.push_back(Pair("addednode", strAddNode));
+            obj.push_back(Pair("connected", false));
+            UniValue addresses(UniValue::VARR);
+            obj.push_back(Pair("addresses", addresses));
+        }
+    }
+
+    LOCK(cs_vNodes);
+    for (list<pair<string, vector<CService> > >::iterator it = laddedAddreses.begin(); it != laddedAddreses.end(); it++)
+    {
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("addednode", it->first));
+
+        UniValue addresses(UniValue::VARR);
+        bool fConnected = false;
+        BOOST_FOREACH(const CService& addrNode, it->second) {
+            bool fFound = false;
+            UniValue node(UniValue::VOBJ);
+            node.push_back(Pair("address", addrNode.ToString()));
+            BOOST_FOREACH(CNode* pnode, vNodes) {
+                if (pnode->addr == addrNode)
+                {
+                    fFound = true;
+                    fConnected = true;
+                    node.push_back(Pair("connected", pnode->fInbound ? "inbound" : "outbound"));
+                    break;
+                }
+            }
+            if (!fFound)
+                node.push_back(Pair("connected", "false"));
+            addresses.push_back(node);
+        }
+        obj.push_back(Pair("connected", fConnected));
+        obj.push_back(Pair("addresses", addresses));
+        ret.push_back(obj);
+    }
+
+    return ret;
+}
+
+UniValue getnettotals(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() > 0)
+        throw runtime_error(
+            "getnettotals\n"
+            "\nReturns information about network traffic, including bytes in, bytes out,\n"
+            "and current time.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"totalbytesrecv\": n,   (numeric) Total bytes received\n"
+            "  \"totalbytessent\": n,   (numeric) Total bytes sent\n"
+            "  \"timemillis\": t,       (numeric) Total cpu time\n"
+            "  \"uploadtarget\":\n"
+            "  {\n"
+            "    \"timeframe\": n,                         (numeric) Length of the measuring timeframe in seconds\n"
+            "    \"target\": n,                            (numeric) Target in bytes\n"
+            "    \"target_reached\": true|false,           (boolean) True if target is reached\n"
+            "    \"serve_historical_blocks\": true|false,  (boolean) True if serving historical blocks\n"
+            "    \"bytes_left_in_cycle\": t,               (numeric) Bytes left in current time cycle\n"
+            "    \"time_left_in_cycle\": t                 (numeric) Seconds left in current time cycle\n"
+            "  }\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getnettotals", "")
+            + HelpExampleRpc("getnettotals", "")
+       );
 
     UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("txid", value.txid.GetHex()));
-    obj.push_back(Pair("index", (int)value.inputIndex));
-    obj.push_back(Pair("height", value.blockHeight));
+    obj.push_back(Pair("totalbytesrecv", CNode::GetTotalBytesRecv()));
+    obj.push_back(Pair("totalbytessent", CNode::GetTotalBytesSent()));
+    obj.push_back(Pair("timemillis", GetTimeMillis()));
 
+    UniValue outboundLimit(UniValue::VOBJ);
+    outboundLimit.push_back(Pair("timeframe", CNode::GetMaxOutboundTimeframe()));
+    outboundLimit.push_back(Pair("target", CNode::GetMaxOutboundTarget()));
+    outboundLimit.push_back(Pair("target_reached", CNode::OutboundTargetReached(false)));
+    outboundLimit.push_back(Pair("serve_historical_blocks", !CNode::OutboundTargetReached(true)));
+    outboundLimit.push_back(Pair("bytes_left_in_cycle", CNode::GetOutboundTargetBytesLeft()));
+    outboundLimit.push_back(Pair("time_left_in_cycle", CNode::GetMaxOutboundTimeLeftInCycle()));
+    obj.push_back(Pair("uploadtarget", outboundLimit));
     return obj;
+}
+
+static UniValue GetNetworksInfo()
+{
+    UniValue networks(UniValue::VARR);
+    for(int n=0; n<NET_MAX; ++n)
+    {
+        enum Network network = static_cast<enum Network>(n);
+        if(network == NET_UNROUTABLE)
+            continue;
+        proxyType proxy;
+        UniValue obj(UniValue::VOBJ);
+        GetProxy(network, proxy);
+        obj.push_back(Pair("name", GetNetworkName(network)));
+        obj.push_back(Pair("limited", IsLimited(network)));
+        obj.push_back(Pair("reachable", IsReachable(network)));
+        obj.push_back(Pair("proxy", proxy.IsValid() ? proxy.proxy.ToStringIPPort() : string()));
+        obj.push_back(Pair("proxy_randomize_credentials", proxy.randomize_credentials));
+        networks.push_back(obj);
+    }
+    return networks;
+}
+
+UniValue getnetworkinfo(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+            "getnetworkinfo\n"
+            "Returns an object containing various state info regarding P2P networking.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"version\": xxxxx,                      (numeric) the server version\n"
+            "  \"subversion\": \"/GoByte Core:x.x.x/\",     (string) the server subversion string\n"
+            "  \"protocolversion\": xxxxx,              (numeric) the protocol version\n"
+            "  \"localservices\": \"xxxxxxxxxxxxxxxx\", (string) the services we offer to the network\n"
+            "  \"timeoffset\": xxxxx,                   (numeric) the time offset\n"
+            "  \"connections\": xxxxx,                  (numeric) the number of connections\n"
+            "  \"networks\": [                          (array) information per network\n"
+            "  {\n"
+            "    \"name\": \"xxx\",                     (string) network (ipv4, ipv6 or onion)\n"
+            "    \"limited\": true|false,               (boolean) is the network limited using -onlynet?\n"
+            "    \"reachable\": true|false,             (boolean) is the network reachable?\n"
+            "    \"proxy\": \"host:port\"               (string) the proxy that is used for this network, or empty if none\n"
+            "  }\n"
+            "  ,...\n"
+            "  ],\n"
+            "  \"relayfee\": x.xxxxxxxx,                (numeric) minimum relay fee for non-free transactions in " + CURRENCY_UNIT + "/kB\n"
+            "  \"localaddresses\": [                    (array) list of local addresses\n"
+            "  {\n"
+            "    \"address\": \"xxxx\",                 (string) network address\n"
+            "    \"port\": xxx,                         (numeric) network port\n"
+            "    \"score\": xxx                         (numeric) relative score\n"
+            "  }\n"
+            "  ,...\n"
+            "  ]\n"
+            "  \"warnings\": \"...\"                    (string) any network warnings (such as alert messages) \n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getnetworkinfo", "")
+            + HelpExampleRpc("getnetworkinfo", "")
+        );
+
+    LOCK(cs_main);
+
+    UniValue obj(UniValue::VOBJ);
+    obj.push_back(Pair("version",       CLIENT_VERSION));
+    obj.push_back(Pair("subversion",    strSubVersion));
+    obj.push_back(Pair("protocolversion",PROTOCOL_VERSION));
+    obj.push_back(Pair("localservices",       strprintf("%016x", nLocalServices)));
+    obj.push_back(Pair("timeoffset",    GetTimeOffset()));
+    obj.push_back(Pair("connections",   (int)vNodes.size()));
+    obj.push_back(Pair("networks",      GetNetworksInfo()));
+    obj.push_back(Pair("relayfee",      ValueFromAmount(::minRelayTxFee.GetFeePerK())));
+    UniValue localAddresses(UniValue::VARR);
+    {
+        LOCK(cs_mapLocalHost);
+        BOOST_FOREACH(const PAIRTYPE(CNetAddr, LocalServiceInfo) &item, mapLocalHost)
+        {
+            UniValue rec(UniValue::VOBJ);
+            rec.push_back(Pair("address", item.first.ToString()));
+            rec.push_back(Pair("port", item.second.nPort));
+            rec.push_back(Pair("score", item.second.nScore));
+            localAddresses.push_back(rec);
+        }
+    }
+    obj.push_back(Pair("localaddresses", localAddresses));
+    obj.push_back(Pair("warnings",       GetWarnings("statusbar")));
+    return obj;
+}
+
+UniValue setban(const UniValue& params, bool fHelp)
+{
+    string strCommand;
+    if (params.size() >= 2)
+        strCommand = params[1].get_str();
+    if (fHelp || params.size() < 2 ||
+        (strCommand != "add" && strCommand != "remove"))
+        throw runtime_error(
+                            "setban \"ip(/netmask)\" \"add|remove\" (bantime) (absolute)\n"
+                            "\nAttempts add or remove a IP/Subnet from the banned list.\n"
+                            "\nArguments:\n"
+                            "1. \"ip(/netmask)\" (string, required) The IP/Subnet (see getpeerinfo for nodes ip) with a optional netmask (default is /32 = single ip)\n"
+                            "2. \"command\"      (string, required) 'add' to add a IP/Subnet to the list, 'remove' to remove a IP/Subnet from the list\n"
+                            "3. \"bantime\"      (numeric, optional) time in seconds how long (or until when if [absolute] is set) the ip is banned (0 or empty means using the default time of 24h which can also be overwritten by the -bantime startup argument)\n"
+                            "4. \"absolute\"     (boolean, optional) If set, the bantime must be a absolute timestamp in seconds since epoch (Jan 1 1970 GMT)\n"
+                            "\nExamples:\n"
+                            + HelpExampleCli("setban", "\"192.168.0.6\" \"add\" 86400")
+                            + HelpExampleCli("setban", "\"192.168.0.0/24\" \"add\"")
+                            + HelpExampleRpc("setban", "\"192.168.0.6\", \"add\" 86400")
+                            );
+
+    CSubNet subNet;
+    CNetAddr netAddr;
+    bool isSubnet = false;
+
+    if (params[0].get_str().find("/") != string::npos)
+        isSubnet = true;
+
+    if (!isSubnet)
+        netAddr = CNetAddr(params[0].get_str());
+    else
+        subNet = CSubNet(params[0].get_str());
+
+    if (! (isSubnet ? subNet.IsValid() : netAddr.IsValid()) )
+        throw JSONRPCError(RPC_CLIENT_NODE_ALREADY_ADDED, "Error: Invalid IP/Subnet");
+
+    if (strCommand == "add")
+    {
+        if (isSubnet ? CNode::IsBanned(subNet) : CNode::IsBanned(netAddr))
+            throw JSONRPCError(RPC_CLIENT_NODE_ALREADY_ADDED, "Error: IP/Subnet already banned");
+
+        int64_t banTime = 0; //use standard bantime if not specified
+        if (params.size() >= 3 && !params[2].isNull())
+            banTime = params[2].get_int64();
+
+        bool absolute = false;
+        if (params.size() == 4 && params[3].isTrue())
+            absolute = true;
+
+        isSubnet ? CNode::Ban(subNet, BanReasonManuallyAdded, banTime, absolute) : CNode::Ban(netAddr, BanReasonManuallyAdded, banTime, absolute);
+
+        //disconnect possible nodes
+        while(CNode *bannedNode = (isSubnet ? FindNode(subNet) : FindNode(netAddr)))
+            bannedNode->fDisconnect = true;
+    }
+    else if(strCommand == "remove")
+    {
+        if (!( isSubnet ? CNode::Unban(subNet) : CNode::Unban(netAddr) ))
+            throw JSONRPCError(RPC_MISC_ERROR, "Error: Unban failed");
+    }
+
+    DumpBanlist(); //store banlist to disk
+    uiInterface.BannedListChanged();
+
+    return NullUniValue;
+}
+
+UniValue listbanned(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+                            "listbanned\n"
+                            "\nList all banned IPs/Subnets.\n"
+                            "\nExamples:\n"
+                            + HelpExampleCli("listbanned", "")
+                            + HelpExampleRpc("listbanned", "")
+                            );
+
+    banmap_t banMap;
+    CNode::GetBanned(banMap);
+
+    UniValue bannedAddresses(UniValue::VARR);
+    for (banmap_t::iterator it = banMap.begin(); it != banMap.end(); it++)
+    {
+        CBanEntry banEntry = (*it).second;
+        UniValue rec(UniValue::VOBJ);
+        rec.push_back(Pair("address", (*it).first.ToString()));
+        rec.push_back(Pair("banned_until", banEntry.nBanUntil));
+        rec.push_back(Pair("ban_created", banEntry.nCreateTime));
+        rec.push_back(Pair("ban_reason", banEntry.banReasonToString()));
+
+        bannedAddresses.push_back(rec);
+    }
+
+    return bannedAddresses;
+}
+
+UniValue clearbanned(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() != 0)
+        throw runtime_error(
+                            "clearbanned\n"
+                            "\nClear all banned IPs.\n"
+                            "\nExamples:\n"
+                            + HelpExampleCli("clearbanned", "")
+                            + HelpExampleRpc("clearbanned", "")
+                            );
+
+    CNode::ClearBanned();
+    DumpBanlist(); //store banlist to disk
+    uiInterface.BannedListChanged();
+
+    return NullUniValue;
 }
